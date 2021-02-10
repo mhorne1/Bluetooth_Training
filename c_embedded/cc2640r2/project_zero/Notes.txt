@@ -1,0 +1,3 @@
+TI ARM Compiler v18.12.1.LTS (Incompatibility with v20.2.1.LTS)
+SimpleLink CC2640R2 SDK v4.30.0.08
+TI-RTOS for BLE-Stack
