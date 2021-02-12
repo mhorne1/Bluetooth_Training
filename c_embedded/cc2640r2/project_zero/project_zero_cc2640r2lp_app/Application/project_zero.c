@@ -81,6 +81,13 @@
 #include "data_service.h"
 
 /*********************************************************************
+ * GPTimer Interrupt and LED Blinking
+ */
+
+#include <ti/sysbios/BIOS.h>
+#include <ti/drivers/timer/GPTimerCC26XX.h>
+
+/*********************************************************************
  * CONSTANTS
  */
 
@@ -167,7 +174,7 @@ typedef struct
   uint16_t connHandle;
   uint8_t  uiInputs;
   uint8_t  uiOutputs;
-  uint32   numComparison;
+  uint32_t   numComparison;
 } passcode_req_t;
 
 // Struct for message about button state
@@ -241,7 +248,6 @@ static PIN_State ledPinState;
 
 /*
  * Initial LED pin configuration table
- *   - LEDs Board_LED0 & Board_LED1 are off.
  */
 PIN_Config ledPinTable[] = {
   Board_RLED | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
@@ -255,7 +261,6 @@ PIN_Config ledPinTable[] = {
  */
 PIN_Config buttonPinTable[] = {
     Board_BUTTON0 | PIN_INPUT_EN | PIN_PULLUP | PIN_IRQ_NEGEDGE,
-    Board_BUTTON1 | PIN_INPUT_EN | PIN_PULLUP | PIN_IRQ_NEGEDGE,
     PIN_TERMINATE
 };
 
@@ -265,7 +270,6 @@ static Clock_Struct button1DebounceClock;
 
 // State of the buttons
 static uint8_t button0State = 0;
-static uint8_t button1State = 0;
 
 // Global display handle
 Display_Handle dispHandle;
@@ -320,9 +324,8 @@ static void buttonCallbackFxn(PIN_Handle handle, PIN_Id pinId);
 
 static char *Util_convertArrayToHexString(uint8_t const *src, uint8_t src_len,
                                           uint8_t *dst, uint8_t dst_len);
-#if defined(UARTLOG_ENABLE)
 static char *Util_getLocalNameStr(const uint8_t *data);
-#endif
+
 /*********************************************************************
  * EXTERN FUNCTIONS
  */
@@ -434,6 +437,181 @@ bStatus_t ProjectZero_UnRegistertToAllConnectionEvent (connectionEventRegisterCa
   return(status);
 }
 
+
+
+
+
+
+
+
+
+
+/*********************************************************************
+ * Project variables and functions
+ */
+static uint8_t gpio_flag = 1;
+static uint8_t gpio_rate = 0;
+uint8_t *gpio_ptr = &gpio_rate;
+
+//unsigned int clk_rate = 0;
+//unsigned char emergency_flag = 0;
+//GPTimerCC26XX_Value loadVal = 0;
+
+
+
+
+/*
+ * Respond to an Emergency (not to the Emergency Button!)
+ * by turning on the Red LED when the driver calls the
+ * callback function.
+ */
+static void RedLEDCallbackFxn( PIN_Handle handle, PIN_Id pinId )
+{
+
+  //emergency_flag = ~emergency_flag;
+  //PIN_setOutputValue(ledPinHandle, Board_RLED, emergency_flag );
+  PIN_setOutputValue(ledPinHandle, Board_RLED, 1 );
+}
+
+
+
+/*
+ * Create handle for GPIO Timer
+ */
+GPTimerCC26XX_Handle hTimer;
+
+
+
+/*
+ * Blink the Green LED based on speed
+ */
+void timerCallback(GPTimerCC26XX_Handle handle, GPTimerCC26XX_IntMask interruptMask) {
+    // interrupt callback code goes here. Minimize processing in interrupt.
+    //GPIO_write(Board_GPIO_LED0, (gpio_flag & 1));
+    //GPIO_write(Board_GPIO_LED1, (gpio_flag ^ 1));
+    //PIN_setOutputValue(ledPinHandle, Board_RLED, (gpio_flag & 1) );
+    if (gpio_rate != 0)
+    {
+        gpio_flag = ~gpio_flag;
+        PIN_setOutputValue(ledPinHandle, Board_GLED, (gpio_flag & 1) );
+    }
+    else
+    {
+        PIN_setOutputValue(ledPinHandle, Board_GLED, 0 );
+    }
+
+}
+
+
+/*
+ * Initialize GPIO Timer for blinking the green LED
+ */
+void gptimer_init( uintptr_t a0, uintptr_t a1 ) {
+  GPTimerCC26XX_Params params;
+  GPTimerCC26XX_Params_init(&params);
+  params.width          = GPT_CONFIG_16BIT;
+  //params.width          = GPT_CONFIG_32BIT;
+  params.mode           = GPT_MODE_PERIODIC;
+  params.direction      = GPTimerCC26XX_DIRECTION_UP;
+  params.debugStallMode = GPTimerCC26XX_DEBUG_STALL_OFF;
+  //hTimer = GPTimerCC26XX_open(CC2650_GPTIMER0A, &params);
+  hTimer = GPTimerCC26XX_open(CC2640R2_LAUNCHXL_GPTIMER0A, &params);
+  if(hTimer == NULL) {
+    //Log_error0("Failed to open GPTimer");
+    Task_exit();
+  }
+  //Types_FreqHz  freq;
+  xdc_runtime_Types_FreqHz  freq;
+  BIOS_getCpuFreq(&freq);
+  GPTimerCC26XX_Value loadVal = freq.lo; //48000000
+  GPTimerCC26XX_setLoadValue(hTimer, loadVal);
+  GPTimerCC26XX_registerInterrupt(hTimer, timerCallback, GPT_INT_TIMEOUT);
+  GPTimerCC26XX_start(hTimer);
+}
+
+
+
+/*
+void taskFxn(uintptr_t a0, uintptr_t a1) {
+  GPTimerCC26XX_Params params;
+  GPTimerCC26XX_Params_init(&params);
+  params.width          = GPT_CONFIG_16BIT;
+  //params.width          = GPT_CONFIG_32BIT;
+  params.mode           = GPT_MODE_PERIODIC;
+  params.direction      = GPTimerCC26XX_DIRECTION_UP;
+  params.debugStallMode = GPTimerCC26XX_DEBUG_STALL_OFF;
+  //hTimer = GPTimerCC26XX_open(CC2650_GPTIMER0A, &params);
+  hTimer = GPTimerCC26XX_open(CC2640R2_LAUNCHXL_GPTIMER0A, &params);
+  if(hTimer == NULL) {
+    //Log_error0("Failed to open GPTimer");
+    Task_exit();
+  }
+  //Types_FreqHz  freq;
+  xdc_runtime_Types_FreqHz  freq;
+  BIOS_getCpuFreq(&freq);
+  GPTimerCC26XX_Value loadVal = freq.lo; //47999
+  //loadVal = freq.lo; //47999
+  //clk_rate = loadVal;
+  //GPTimerCC26XX_Value loadVal = freq.lo / 1000 - 1; //47999
+  //GPTimerCC26XX_Value loadVal = freq.lo; //47999
+  //GPTimerCC26XX_Value loadVal = 48000000 / 1000 - 1; //47999
+  //GPTimerCC26XX_Value loadVal = 48000000 / 1 - 1; //47999
+  //GPTimerCC26XX_Value loadVal = 48000000; //47999
+  GPTimerCC26XX_setLoadValue(hTimer, loadVal);
+  GPTimerCC26XX_registerInterrupt(hTimer, timerCallback, GPT_INT_TIMEOUT);
+  GPTimerCC26XX_start(hTimer);
+
+  //while(1) {
+  //  Task_sleep(BIOS_WAIT_FOREVER);
+  //}
+
+}
+*/
+
+
+
+/*
+void timerset(unsigned char *val)
+{
+    // GPTimerCC26XX_stop(hTimer);
+    // *val = *val + 1;
+    if (*val > 3)
+    {
+        *val = 0;
+        //GPTimerCC26XX_setLoadValue(hTimer, loadVal);
+    }
+    else if (*val == 3)
+    {
+        //GPTimerCC26XX_setLoadValue(hTimer, (loadVal * gpio_rate ) ); //
+        //GPTimerCC26XX_setLoadValue(hTimer, 36000000 ); //
+        GPTimerCC26XX_setLoadValue(hTimer, (0x3FFFFF - 1) ); //
+        //PIN_setOutputValue(ledPinHandle, Board_RLED, 1 );
+    }
+    else if (*val == 2)
+    {
+        //GPTimerCC26XX_setLoadValue(hTimer, (loadVal * gpio_rate ) ); //
+        //GPTimerCC26XX_setLoadValue(hTimer, 24000000 ); //
+        GPTimerCC26XX_setLoadValue(hTimer, (0x7FFFFF - 1) ); //
+    }
+    else if (*val == 1)
+    {
+        //GPTimerCC26XX_setLoadValue(hTimer, (loadVal * gpio_rate ) ); //
+        //GPTimerCC26XX_setLoadValue(hTimer, 48000000 ); //
+        //GPTimerCC26XX_setLoadValue(hTimer, (16777215 - 1) ); //
+        GPTimerCC26XX_setLoadValue(hTimer, (0xFFFFFF - 1) ); //
+        //PIN_setOutputValue(ledPinHandle, Board_RLED, 0 );
+    }
+}
+*/
+
+
+
+
+
+
+
+
+
 /*********************************************************************
  * PUBLIC FUNCTIONS
  */
@@ -520,12 +698,6 @@ static void ProjectZero_init(void)
   // Initialize to 50 ms timeout when Clock_start is called.
   // Timeout argument is in ticks, so convert from ms to ticks via tickPeriod.
   Clock_construct(&button0DebounceClock, buttonDebounceSwiFxn,
-                  50 * (1000/Clock_tickPeriod),
-                  &clockParams);
-
-  // Second button
-  clockParams.arg = Board_BUTTON1;
-  Clock_construct(&button1DebounceClock, buttonDebounceSwiFxn,
                   50 * (1000/Clock_tickPeriod),
                   &clockParams);
 
@@ -658,6 +830,13 @@ static void ProjectZero_taskFxn(UArg a0, UArg a1)
 {
   // Initialize application
   ProjectZero_init();
+
+  // Call API Initialization function with a call back function address
+  // for when the emergency button is pressed.
+  api_init( &RedLEDCallbackFxn );
+
+  // GPTimer interrupt and led blinking
+  gptimer_init(0, 0); // interrupt and led blinking task function
 
   // Application main loop
   for (;;)
@@ -917,9 +1096,15 @@ static void user_handleButtonPress(button_state_t *pState)
                                  &pState->state);
       break;
     case Board_BUTTON1:
+      /*
       ButtonService_SetParameter(BS_BUTTON1_ID,
                                  sizeof(pState->state),
                                  &pState->state);
+      */
+      break;
+
+
+    default:
       break;
   }
 }
@@ -951,11 +1136,7 @@ void user_LedService_ValueChangeHandler(char_data_t *pCharData)
                 (IArg)"LED0",
                 (IArg)pretty_data_holder);
 
-      // Do something useful with pCharData->data here
-      // -------------------------
-      // Set the output value equal to the received value. 0 is off, not 0 is on
-      PIN_setOutputValue(ledPinHandle, Board_RLED, pCharData->data[0]);
-      Log_info2("Turning %s %s",
+      Log_info2("Not turning %s %s",
                 (IArg)"\x1b[31mLED0\x1b[0m",
                 (IArg)(pCharData->data[0]?"on":"off"));
       break;
@@ -966,10 +1147,14 @@ void user_LedService_ValueChangeHandler(char_data_t *pCharData)
                 (IArg)"LED1",
                 (IArg)pretty_data_holder);
 
-      // Do something useful with pCharData->data here
-      // -------------------------
-      // Set the output value equal to the received value. 0 is off, not 0 is on
-      PIN_setOutputValue(ledPinHandle, Board_GLED, pCharData->data[0]);
+      // Set Green LED blinking speed
+      api_set_speed(pCharData->data[0]);
+
+      // Turn off RED LED
+      PIN_setOutputValue(ledPinHandle, Board_RLED, 0 );
+
+
+
       Log_info2("Turning %s %s",
                 (IArg)"\x1b[32mLED1\x1b[0m",
                 (IArg)(pCharData->data[0]?"on":"off"));
@@ -992,7 +1177,6 @@ void user_LedService_ValueChangeHandler(char_data_t *pCharData)
  */
 void user_ButtonService_CfgChangeHandler(char_data_t *pCharData)
 {
-#if defined(UARTLOG_ENABLE)
   // Cast received data to uint16, as that's the format for CCCD writes.
   uint16_t configValue = *(uint16_t *)pCharData->data;
   char *configValString;
@@ -1010,7 +1194,7 @@ void user_ButtonService_CfgChangeHandler(char_data_t *pCharData)
     configValString = "Indications enabled";
     break;
   }
-#endif
+
   switch (pCharData->paramID)
   {
     case BS_BUTTON0_ID:
@@ -1097,7 +1281,6 @@ void user_DataService_ValueChangeHandler(char_data_t *pCharData)
  */
 void user_DataService_CfgChangeHandler(char_data_t *pCharData)
 {
-#if defined(UARTLOG_ENABLE)
   // Cast received data to uint16, as that's the format for CCCD writes.
   uint16_t configValue = *(uint16_t *)pCharData->data;
   char *configValString;
@@ -1115,7 +1298,7 @@ void user_DataService_CfgChangeHandler(char_data_t *pCharData)
     configValString = "Indications enabled";
     break;
   }
-#endif
+
   switch (pCharData->paramID)
   {
     case DS_STREAM_ID:
@@ -1516,24 +1699,18 @@ static void buttonDebounceSwiFxn(UArg buttonId)
         // Button was pressed
         buttonMsg.state = button0State = 1;
         sendMsg = TRUE;
+
+        // Increment Green LED blinking speed
+        api_incr_speed();
+
+        // Turn off the RED LED
+        PIN_setOutputValue(ledPinHandle, Board_RLED, 0 );
+
       }
       break;
 
     case Board_BUTTON1:
-      // If button is now released (buttonPinVal is active low, so release is 1)
-      // and button state was pressed (buttonstate is active high so press is 1)
-      if (buttonPinVal && button1State)
-      {
-        // Button was released
-        buttonMsg.state = button1State = 0;
-        sendMsg = TRUE;
-      }
-      else if (!buttonPinVal && !button1State)
-      {
-        // Button was pressed
-        buttonMsg.state = button1State = 1;
-        sendMsg = TRUE;
-      }
+    default:
       break;
   }
 
@@ -1570,8 +1747,9 @@ static void buttonCallbackFxn(PIN_Handle handle, PIN_Id pinId)
     case Board_BUTTON0:
       Clock_start(Clock_handle(&button0DebounceClock));
       break;
+
     case Board_BUTTON1:
-      Clock_start(Clock_handle(&button1DebounceClock));
+    default:
       break;
   }
 }
@@ -1728,7 +1906,6 @@ static char *Util_convertArrayToHexString(uint8_t const *src, uint8_t src_len,
   return (char *)dst;
 }
 
-#if defined(UARTLOG_ENABLE)
 /*
  * @brief   Extract the LOCALNAME from Scan/AdvData
  *
@@ -1758,7 +1935,6 @@ static char *Util_getLocalNameStr(const uint8_t *data) {
 
   return localNameStr;
 }
-#endif
 
 /*********************************************************************
 *********************************************************************/

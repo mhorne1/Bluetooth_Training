@@ -55,9 +55,14 @@ extern "C"
  * INCLUDES
  */
 
+#include <ti/drivers/timer/GPTimerCC26XX.h>
+
 /*********************************************************************
 *  EXTERNAL VARIABLES
 */
+
+extern GPTimerCC26XX_Handle hTimer;
+extern uint8_t *gpio_ptr;
 
 /*********************************************************************
  * TYPEDEFS
@@ -80,6 +85,24 @@ extern "C"
  */
 extern void ProjectZero_createTask(void);
 
+
+/*
+ * API Layer Functions
+ */
+extern void api_init( void (*ptr)(PIN_Handle handle, PIN_Id pinId) );
+
+extern void api_incr_speed( void );
+
+extern void api_set_speed( uint8_t speed );
+
+/*
+ * Driver Layer Functions
+ */
+extern void drv_init( void (*ptr)(PIN_Handle handle, PIN_Id pinId) );
+
+extern void drv_incr_speed( void );
+
+extern void drv_set_speed( uint8_t val );
 
 /*********************************************************************
 *********************************************************************/
